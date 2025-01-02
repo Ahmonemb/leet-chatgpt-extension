@@ -1,10 +1,9 @@
-import { v4 as uuid } from 'uuid';
 import { ISSEChatGPTResponse } from '../../interfaces';
 import { ClientError, ErrorCode } from '../../utils/errors';
 import { parseSSE } from '../../utils/sse';
 import { AbstractClient, IGenerateResponseParams } from '../abstract';
-import { getArkoseToken } from './arkose';
-import { chatGPTClient } from './client';
+import ollama  from 'ollama';
+import { spawn } from'child_process'
 
 interface ConversationContext {
   conversationId: string;
@@ -19,38 +18,21 @@ export class ChatGPTApiClient extends AbstractClient {
   private modelName: string | undefined;
 
   async doAskAI(params: IGenerateResponseParams): Promise<void> {
-    if (!this.accessToken) this.accessToken = await chatGPTClient.getAccessToken();
 
-    const currentModel = await this.getCurrentModel();
-    const arkoseToken = await getArkoseToken();
+    const currentModel = 'llama3.2:1b-instruct-fp16';
+    spawn('ollama pull ' + currentModel, [], { shell: true, stdio: 'inherit' })
 
-    const resp = await chatGPTClient.fetch('https://chat.openai.com/backend-api/conversation', {
-      method: 'POST',
-      signal: params.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.accessToken}`,
-      },
-      body: JSON.stringify({
-        action: 'next',
-        messages: [
-          {
-            id: uuid(),
-            author: { role: 'user' },
-            content: {
-              content_type: 'text',
-              parts: [params.prompt],
-            },
-          },
-        ],
-        model: currentModel,
-        conversation_id: this.conversationCtx?.conversationId || undefined,
-        parent_message_id: this.conversationCtx?.lastMessageId || uuid(),
-        arkose_token: arkoseToken,
-      }),
+    const response = await ollama.chat({
+      model: currentModel,
+      messages: [
+        {
+          role: 'user',
+          content: params.prompt,
+        },
+      ],
     });
 
-    const respClone = resp.clone();
+    const respClone = response.message.content.clone();
 
     await parseSSE(respClone, (message) => {
       if (message === '[DONE]') {
@@ -87,16 +69,16 @@ export class ChatGPTApiClient extends AbstractClient {
     this.conversationCtx = undefined;
   }
 
-  private async getCurrentModel(): Promise<string> {
-    if (this.modelName) return this.modelName;
+  // private async getCurrentModel(): Promise<string> {
+  //   if (this.modelName) return this.modelName;
 
-    try {
-      const models = await chatGPTClient.getModels(this.accessToken!);
-      this.modelName = models[0].slug;
-      return this.modelName;
-    } catch (error) {
-      console.error(error);
-      return 'text-davinci-002-render';
-    }
-  }
+  //   try {
+  //     const models = await chatGPTClient.getModels(this.accessToken!);
+  //     this.modelName = models[0].slug;
+  //     return this.modelName;
+  //   } catch (error) {
+  //     console.error(error);
+  //     return 'text-davinci-002-render';
+  //   }
+  // }
 }
